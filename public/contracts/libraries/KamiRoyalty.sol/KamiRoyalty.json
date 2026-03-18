@@ -1,0 +1,26 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "KamiRoyalty",
+  "sourceName": "contracts/libraries/KamiRoyalty.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "RoyaltiesMustSumTo10000",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "RoyaltyPercentageTooHigh",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "TokenDoesNotExist",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x6080806040523460175760119081601d823930815050f35b600080fdfe600080fdfea164736f6c6343000818000a",
+  "deployedBytecode": "0x600080fdfea164736f6c6343000818000a",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

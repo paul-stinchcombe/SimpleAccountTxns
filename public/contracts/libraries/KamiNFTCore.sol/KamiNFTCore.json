@@ -1,0 +1,50 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "KamiNFTCore",
+  "sourceName": "contracts/libraries/KamiNFTCore.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "OWNER_ROLE",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "PLATFORM_ROLE",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "RENTER_ROLE",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x608080604052346100195760ef908161001f823930815050f35b600080fdfe6080806040526004361015601257600080fd5b600090813560e01c90816370824c5c1460aa57508063b97c9f771460755763e58378bb14603e57600080fd5b8060031936011260725760206040517fb19546dff01e856fb3f010c267a7b1c60363cf8a4664e21cc89c26224620214e8152f35b80fd5b508060031936011260725760206040517f3b652633b3026fa70803ad50b58b0ae884cefe3497643f62c67c466f41a6e88d8152f35b90508160031936011260de57807f797343f8d6a29aafeb3aaf0910a8973e0081c60c2f6c1f775cd9f76ea348fc1e60209252f35b5080fdfea164736f6c6343000818000a",
+  "deployedBytecode": "0x6080806040526004361015601257600080fd5b600090813560e01c90816370824c5c1460aa57508063b97c9f771460755763e58378bb14603e57600080fd5b8060031936011260725760206040517fb19546dff01e856fb3f010c267a7b1c60363cf8a4664e21cc89c26224620214e8152f35b80fd5b508060031936011260725760206040517f3b652633b3026fa70803ad50b58b0ae884cefe3497643f62c67c466f41a6e88d8152f35b90508160031936011260de57807f797343f8d6a29aafeb3aaf0910a8973e0081c60c2f6c1f775cd9f76ea348fc1e60209252f35b5080fdfea164736f6c6343000818000a",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

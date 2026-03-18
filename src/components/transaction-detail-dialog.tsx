@@ -43,6 +43,41 @@ function AddressWithLabel({
   );
 }
 
+function DecodedMethodSummary({ method }: { method: TransactionDetailResponse["transaction"]["decodedMethod"] }) {
+  if (method.status !== "decoded") {
+    return (
+      <p className="mt-1 text-xs text-slate-400">
+        {method.status === "unknown"
+          ? "Unknown selector (not found in loaded artifacts)"
+          : method.status === "invalid"
+            ? method.error ?? "Unable to decode calldata"
+            : "No calldata"}
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1">
+      <p className="text-sm">{method.signature ?? method.functionName ?? method.selector}</p>
+      {method.contractNames?.length ? (
+        <p className="mt-1 text-xs text-slate-400">ABI match: {method.contractNames.join(", ")}</p>
+      ) : null}
+      {method.args?.length ? (
+        <div className="mt-2 space-y-1">
+          {method.args.slice(0, 5).map((arg) => (
+            <p key={`${arg.name}-${arg.type}`} className="font-mono text-[11px] text-slate-400">
+              {arg.name || "_"} ({arg.type}): {arg.value}
+            </p>
+          ))}
+          {method.args.length > 5 ? (
+            <p className="text-[11px] text-slate-500">+ {method.args.length - 5} more argument(s)</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TransactionDetailDialog({ tx, chainId, open, onOpenChange }: TransactionDetailDialogProps) {
   const detailQuery = useQuery({
     queryKey: ["transaction-detail", chainId, tx.hash],
@@ -111,8 +146,9 @@ export function TransactionDetailDialog({ tx, chainId, open, onOpenChange }: Tra
                   <p className="mt-1 text-sm">{detailQuery.data.transaction.valueEth}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Method ID</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Method</p>
                   <p className="mt-1 text-sm font-mono">{detailQuery.data.transaction.methodId}</p>
+                  <DecodedMethodSummary method={detailQuery.data.transaction.decodedMethod} />
                 </div>
               </section>
 
@@ -133,10 +169,24 @@ export function TransactionDetailDialog({ tx, chainId, open, onOpenChange }: Tra
                         <p className="text-xs text-slate-400">
                           Depth {call.depth} • {call.callType}
                         </p>
+                        <p className="mt-1 font-mono text-[11px] text-slate-500">
+                          {call.decodedMethod.signature ?? call.methodId}
+                        </p>
                         <p className="mt-1 text-xs text-slate-300">
                           {(call.fromLabel ?? shortAddress(call.from))} → {(call.toLabel ?? shortAddress(call.to))} •{" "}
                           {call.valueWei} wei
                         </p>
+                        {call.decodedMethod.args?.length ? (
+                          <p className="mt-1 font-mono text-[11px] text-slate-500">
+                            {call.decodedMethod.args
+                              .slice(0, 2)
+                              .map((arg) => `${arg.name || "_"}=${arg.value}`)
+                              .join(" • ")}
+                            {call.decodedMethod.args.length > 2
+                              ? ` • +${call.decodedMethod.args.length - 2} more`
+                              : ""}
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                   </div>

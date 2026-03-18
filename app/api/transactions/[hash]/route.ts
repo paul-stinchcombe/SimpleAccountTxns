@@ -3,6 +3,7 @@ import { formatEther, formatUnits } from "viem";
 
 import { getAddressLabels } from "@/src/lib/address-labels";
 import { fetchBlockscoutInternalTransactions, getBlockscoutBaseUrl } from "@/src/lib/blockscout";
+import { decodeMethodCall } from "@/src/lib/decoders";
 import { getChainContext } from "@/src/lib/platform";
 import { prisma } from "@/src/lib/prisma";
 import { createRpcClient, getInternalCalls } from "@/src/lib/rpc";
@@ -328,6 +329,7 @@ export async function GET(request: NextRequest, context: Params) {
 
     const txFrom = tx.from.toLowerCase();
     const txTo = tx.to?.toLowerCase() ?? null;
+    const decodedTxMethod = decodeMethodCall(tx.input);
 
     return NextResponse.json({
       chain: {
@@ -356,17 +358,23 @@ export async function GET(request: NextRequest, context: Params) {
         blockHash: receipt.blockHash,
         transactionIndex: receipt.transactionIndex,
         timestamp: block.timestamp.toString(),
-        methodId: tx.input.slice(0, 10),
+        methodId: decodedTxMethod.selector,
+        decodedMethod: decodedTxMethod,
         input: tx.input,
       },
       internalCalls: {
         source: internalCalls.source,
         unavailableReason: internalCalls.unavailableReason ?? null,
-        items: internalCalls.calls.map((call) => ({
-          ...call,
-          fromLabel: labels[call.from.toLowerCase()]?.label,
-          toLabel: labels[call.to.toLowerCase()]?.label,
-        })),
+        items: internalCalls.calls.map((call) => {
+          const decodedMethod = decodeMethodCall(call.input);
+          return {
+            ...call,
+            fromLabel: labels[call.from.toLowerCase()]?.label,
+            toLabel: labels[call.to.toLowerCase()]?.label,
+            methodId: decodedMethod.selector,
+            decodedMethod,
+          };
+        }),
       },
       transfers: transfers.map((transfer) => ({
         ...transfer,

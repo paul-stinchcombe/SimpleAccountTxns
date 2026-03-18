@@ -11,6 +11,22 @@ export type ChainsResponse = {
   chains: ChainOption[];
 };
 
+export type DecodedMethodArg = {
+  name: string;
+  type: string;
+  value: string;
+};
+
+export type DecodedMethodCall = {
+  selector: string;
+  status: "decoded" | "empty" | "unknown" | "invalid";
+  functionName?: string;
+  signature?: string;
+  args?: DecodedMethodArg[];
+  contractNames?: string[];
+  error?: string;
+};
+
 export type TransactionListItem = {
   hash: string;
   blockNumber: string;
@@ -79,6 +95,7 @@ export type TransactionDetailResponse = {
     transactionIndex: number;
     timestamp: string;
     methodId: string;
+    decodedMethod: DecodedMethodCall;
     input: string;
   };
   internalCalls: {
@@ -94,6 +111,8 @@ export type TransactionDetailResponse = {
       toLabel?: string;
       valueWei: string;
       input: string;
+      methodId: string;
+      decodedMethod: DecodedMethodCall;
       error?: string;
     }[];
   };
