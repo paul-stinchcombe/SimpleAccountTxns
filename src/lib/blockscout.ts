@@ -23,6 +23,22 @@ type BlockscoutResponse = {
   next_page_params?: Record<string, unknown> | null;
 };
 
+type BlockscoutInternalTx = {
+  from?: { hash?: string } | string | null;
+  to?: { hash?: string } | string | null;
+  value?: string;
+  input?: string;
+  type?: string;
+  call_type?: string;
+  trace_address?: number[];
+  error?: string | null;
+  success?: boolean;
+};
+
+type BlockscoutInternalTxResponse = {
+  items?: BlockscoutInternalTx[];
+};
+
 export type NormalizedExplorerTx = {
   hash: string;
   chainId: string;
@@ -39,6 +55,17 @@ export type NormalizedExplorerTx = {
   blockHash?: string;
   transactionIndex?: number;
   status?: number;
+};
+
+export type BlockscoutInternalCall = {
+  depth: number;
+  type: string;
+  callType: string;
+  from: string;
+  to: string;
+  valueWei: string;
+  input: string;
+  error?: string;
 };
 
 function normalizeAddress(value: string | { hash?: string } | null | undefined): string | null {
@@ -213,4 +240,39 @@ export async function fetchBlockscoutTransactions(params: {
       : undefined;
 
   return { items, nextCursor };
+}
+
+function normalizeInternalCall(item: BlockscoutInternalTx): BlockscoutInternalCall | null {
+  const from = normalizeAddress(item.from);
+  const to = normalizeAddress(item.to);
+  if (!from || !to) {
+    return null;
+  }
+
+  return {
+    depth: item.trace_address?.length ?? 0,
+    type: item.type ?? item.call_type ?? "call",
+    callType: item.call_type ?? item.type ?? "call",
+    from,
+    to,
+    valueWei: item.value ?? "0",
+    input: item.input ?? "0x",
+    error: item.success === false ? (item.error ?? "Reverted") : (item.error ?? undefined),
+  };
+}
+
+export async function fetchBlockscoutInternalTransactions(params: {
+  baseUrl: string;
+  hash: string;
+}): Promise<BlockscoutInternalCall[]> {
+  const txHash = params.hash.toLowerCase();
+  const url = new URL(`${params.baseUrl}/api/v2/transactions/${txHash}/internal-transactions`);
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) {
+    throw new Error(`Blockscout internal-transactions request failed with status ${response.status}`);
+  }
+
+  const payload = (await response.json()) as BlockscoutInternalTxResponse | BlockscoutInternalTx[];
+  const items = Array.isArray(payload) ? payload : (payload.items ?? []);
+  return items.map((item) => normalizeInternalCall(item)).filter((item): item is BlockscoutInternalCall => item !== null);
 }

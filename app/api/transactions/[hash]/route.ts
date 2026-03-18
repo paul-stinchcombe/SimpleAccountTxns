@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { formatEther, formatUnits } from "viem";
 
 import { getAddressLabels } from "@/src/lib/address-labels";
+import { fetchBlockscoutInternalTransactions, getBlockscoutBaseUrl } from "@/src/lib/blockscout";
 import { getChainContext } from "@/src/lib/platform";
 import { prisma } from "@/src/lib/prisma";
 import { createRpcClient, getInternalCalls } from "@/src/lib/rpc";
@@ -88,6 +89,23 @@ function readNftName(metadata: unknown): string | undefined {
   return undefined;
 }
 
+function humanizeInternalCallReason(reason: string, blockscoutConfigured: boolean): string {
+  const lower = reason.toLowerCase();
+  const isTraceMethodUnavailable =
+    lower.includes("trace_transaction") ||
+    lower.includes("debug_tracetransaction") ||
+    (lower.includes("method") && lower.includes("not available")) ||
+    (lower.includes("method") && lower.includes("does not exist"));
+
+  if (!isTraceMethodUnavailable) {
+    return reason;
+  }
+
+  return blockscoutConfigured
+    ? "This RPC endpoint does not support trace methods for this network. Blockscout fallback was attempted but no internal calls were returned."
+    : "This RPC endpoint does not support trace methods for this network. Configure BLOCKSCOUT_API_BASE_<CHAIN_ID> to enable Blockscout fallback.";
+}
+
 export async function GET(request: NextRequest, context: Params) {
   const { hash } = await context.params;
   const parsedQuery = TransactionDetailQuerySchema.safeParse({
@@ -118,6 +136,26 @@ export async function GET(request: NextRequest, context: Params) {
 
     const block = await client.getBlock({ blockHash: receipt.blockHash });
     const trace = await getInternalCalls(chain.rpcUrl, hash);
+    const blockscoutBase = getBlockscoutBaseUrl(chain.chainId);
+    const blockscoutConfigured = Boolean(blockscoutBase);
+    const fallbackInternalCalls =
+      trace.source === "none" && trace.calls.length === 0 && blockscoutBase
+        ? await fetchBlockscoutInternalTransactions({ baseUrl: blockscoutBase, hash }).catch(() => [])
+        : [];
+    const internalCalls =
+      fallbackInternalCalls.length > 0
+        ? {
+            calls: fallbackInternalCalls,
+            source: "blockscout_internal_transactions" as const,
+            unavailableReason: undefined,
+          }
+        : {
+            ...trace,
+            unavailableReason: trace.unavailableReason
+              ? humanizeInternalCallReason(trace.unavailableReason, blockscoutConfigured)
+              : trace.unavailableReason,
+          };
+
     const transfers = decodeTransferLogs(
       receipt.logs.map((log) => ({
         address: log.address,
@@ -135,7 +173,7 @@ export async function GET(request: NextRequest, context: Params) {
       addresses: [
         tx.from,
         tx.to,
-        ...trace.calls.flatMap((call) => [call.from, call.to]),
+        ...internalCalls.calls.flatMap((call) => [call.from, call.to]),
         ...transfers.flatMap((transfer) => [transfer.tokenAddress, transfer.from, transfer.to]),
       ],
     });
@@ -322,9 +360,9 @@ export async function GET(request: NextRequest, context: Params) {
         input: tx.input,
       },
       internalCalls: {
-        source: trace.source,
-        unavailableReason: trace.unavailableReason ?? null,
-        items: trace.calls.map((call) => ({
+        source: internalCalls.source,
+        unavailableReason: internalCalls.unavailableReason ?? null,
+        items: internalCalls.calls.map((call) => ({
           ...call,
           fromLabel: labels[call.from.toLowerCase()]?.label,
           toLabel: labels[call.to.toLowerCase()]?.label,

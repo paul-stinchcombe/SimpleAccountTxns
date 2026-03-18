@@ -24,6 +24,7 @@ export function ExplorerPage() {
   const searchParamsString = searchParams.toString();
   const chainFromUrl = searchParams.get("chainId");
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed">("all");
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const chainsQuery = useQuery({
@@ -106,21 +107,33 @@ export function ExplorerPage() {
           />
           <section className="mt-4 rounded-2xl border border-white/15 bg-slate-900/70 p-5 shadow-xl backdrop-blur">
             <label htmlFor="transaction-search" className="text-sm font-semibold text-white">
-              Search transactions
+              Search and filter transactions
             </label>
             <p className="mt-1 text-xs text-slate-300">
-              Search by transaction hash, wallet address, or contract address.
+              Search by hash/address/contract and filter by execution result.
             </p>
-            <div className="relative mt-3">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                id="transaction-search"
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="0x... hash or address"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-slate-100 outline-none transition focus:border-indigo-500"
-              />
+            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="transaction-search"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="0x... hash or address"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-slate-100 outline-none transition focus:border-indigo-500"
+                />
+              </div>
+              <select
+                aria-label="Filter by transaction status"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as "all" | "success" | "failed")}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-indigo-500"
+              >
+                <option value="all">All statuses</option>
+                <option value="success">Success only</option>
+                <option value="failed">Failed only</option>
+              </select>
             </div>
           </section>
           {selectedChain ? (
@@ -129,6 +142,7 @@ export function ExplorerPage() {
               chainName={selectedChain.chainName}
               simpleAccountAddress={selectedChain.simpleAccountAddress}
               searchQuery={deferredSearchQuery}
+              statusFilter={statusFilter}
             />
           ) : null}
         </>

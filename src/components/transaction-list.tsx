@@ -13,17 +13,22 @@ type TransactionListProps = {
   chainName: string;
   simpleAccountAddress: string;
   searchQuery: string;
+  statusFilter: "all" | "success" | "failed";
 };
 
 async function fetchTransactions(
   chainId: string,
   searchQuery: string,
+  statusFilter: "all" | "success" | "failed",
   cursor?: string,
 ): Promise<TransactionsResponse> {
   const params = new URLSearchParams({ chainId, limit: "25" });
   const q = searchQuery.trim();
   if (q) {
     params.set("q", q);
+  }
+  if (statusFilter !== "all") {
+    params.set("status", statusFilter);
   }
   if (cursor) {
     params.set("cursor", cursor);
@@ -40,13 +45,14 @@ export function TransactionList({
   chainName,
   simpleAccountAddress,
   searchQuery,
+  statusFilter,
 }: TransactionListProps) {
   const [selectedTx, setSelectedTx] = useState<TransactionListItem | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const query = useInfiniteQuery({
-    queryKey: ["transactions", chainId, searchQuery],
-    queryFn: ({ pageParam }) => fetchTransactions(chainId, searchQuery, pageParam),
+    queryKey: ["transactions", chainId, searchQuery, statusFilter],
+    queryFn: ({ pageParam }) => fetchTransactions(chainId, searchQuery, statusFilter, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.pagination.nextCursor,
   });
@@ -107,6 +113,12 @@ export function TransactionList({
             Filter: <span className="font-mono text-slate-300">{searchQuery.trim()}</span>
           </p>
         ) : null}
+        <p className="mt-2 text-xs text-slate-400">
+          Status:{" "}
+          <span className="text-slate-300">
+            {statusFilter === "all" ? "All" : statusFilter === "success" ? "Success only" : "Failed only"}
+          </span>
+        </p>
       </div>
 
       {items.length === 0 ? (
@@ -126,6 +138,17 @@ export function TransactionList({
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-indigo-500/20 px-2 py-1 text-xs text-indigo-200">Tx</span>
+                <span
+                  className={`rounded-full px-2 py-1 text-xs ${
+                    tx.status === "success"
+                      ? "bg-emerald-500/20 text-emerald-200"
+                      : tx.status === "failed"
+                        ? "bg-red-500/20 text-red-200"
+                        : "bg-slate-600/40 text-slate-200"
+                  }`}
+                >
+                  {tx.status === "success" ? "Success" : tx.status === "failed" ? "Failed" : "Unknown"}
+                </span>
                 <span className="font-mono text-xs text-slate-300">{tx.hash}</span>
               </div>
               <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-4">

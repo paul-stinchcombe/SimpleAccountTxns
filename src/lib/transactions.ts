@@ -7,6 +7,7 @@ export type RpcTransaction = {
   from: `0x${string}` | string;
   to: `0x${string}` | string | null;
   value: `0x${string}` | string;
+  status?: "success" | "failed" | "unknown";
 };
 
 export function mergeTransactionsLatestFirst(
@@ -40,6 +41,7 @@ export type TransactionListItem = {
   timestamp: string;
   from: string;
   to: string | null;
+  status: "success" | "failed" | "unknown";
   valueWei: string;
   valueEth: string;
 };
@@ -55,6 +57,7 @@ export function toTransactionListItem(tx: RpcTransaction): TransactionListItem {
     timestamp: tx.timestamp.toString(),
     from: tx.from.toString().toLowerCase(),
     to: tx.to ? tx.to.toString().toLowerCase() : null,
+    status: tx.status ?? "unknown",
     valueWei,
     valueEth: formatEther(BigInt(valueWei)),
   };

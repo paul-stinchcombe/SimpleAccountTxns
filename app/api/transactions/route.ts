@@ -23,6 +23,18 @@ import {
 
 const BACKFILL_START_TIMESTAMP_SEC = 1772323200; // 2026-03-01T00:00:00Z
 
+type StatusFilter = "all" | "success" | "failed";
+
+function toListStatus(status: number | null | undefined): "success" | "failed" | "unknown" {
+  if (status === 1) {
+    return "success";
+  }
+  if (status === 0) {
+    return "failed";
+  }
+  return "unknown";
+}
+
 async function upsertExplorerTransactions(items: NormalizedExplorerTx[]) {
   if (items.length === 0) {
     return;
@@ -74,6 +86,7 @@ export async function GET(request: NextRequest) {
     chainId: request.nextUrl.searchParams.get("chainId"),
     cursor: request.nextUrl.searchParams.get("cursor") ?? undefined,
     q: request.nextUrl.searchParams.get("q") ?? undefined,
+    status: request.nextUrl.searchParams.get("status") ?? undefined,
     limit: request.nextUrl.searchParams.get("limit") ?? undefined,
   });
 
@@ -91,6 +104,7 @@ export async function GET(request: NextRequest) {
     const { chainId } = parsedQuery.data;
     const searchQuery = parsedQuery.data.q?.trim();
     const normalizedSearch = searchQuery?.toLowerCase();
+    const statusFilter = parsedQuery.data.status as StatusFilter;
     const limit = safeLimit(parsedQuery.data.limit, 25);
     const windowSize = Math.max(10, envNumber("TX_SCAN_WINDOW", 30));
     const maxWindows = Math.max(1, envNumber("TX_SCAN_MAX_WINDOWS", 2));
@@ -118,6 +132,12 @@ export async function GET(request: NextRequest) {
               ],
         }
       : undefined;
+    const statusWhere: Prisma.transactionWhereInput | undefined =
+      statusFilter === "success"
+        ? { status: 1 }
+        : statusFilter === "failed"
+          ? { status: 0 }
+          : undefined;
 
     let dbRows = await prisma.transaction.findMany({
       where: {
@@ -131,6 +151,7 @@ export async function GET(request: NextRequest) {
             ? { not: null, lt: Number(cursorBlock) }
             : { not: null },
         ...(searchFilter ?? {}),
+        ...(statusWhere ?? {}),
       },
       orderBy: [{ blockNumber: "desc" }, { transactionIndex: "desc" }, { timestamp: "desc" }],
       take: limit,
@@ -168,6 +189,7 @@ export async function GET(request: NextRequest) {
                 : { not: null },
             timestamp: { gte: BigInt(BACKFILL_START_TIMESTAMP_SEC) },
             ...(searchFilter ?? {}),
+            ...(statusWhere ?? {}),
           },
           orderBy: [{ blockNumber: "desc" }, { transactionIndex: "desc" }, { timestamp: "desc" }],
           take: limit,
@@ -200,6 +222,7 @@ export async function GET(request: NextRequest) {
           timestamp: row.timestamp.toString(),
           from: row.from.toLowerCase(),
           to: row.to?.toLowerCase() ?? null,
+          status: toListStatus(row.status),
           fromLabel: labels[row.from.toLowerCase()]?.label,
           toLabel: row.to ? labels[row.to.toLowerCase()]?.label : undefined,
           valueWei,
@@ -262,6 +285,19 @@ export async function GET(request: NextRequest) {
             }
           }
 
+          let txStatus: "success" | "failed" | "unknown" = "unknown";
+          if (statusFilter !== "all") {
+            try {
+              const receipt = await client.getTransactionReceipt({ hash: tx.hash });
+              txStatus = receipt.status === "success" ? "success" : "failed";
+            } catch {
+              continue;
+            }
+            if (txStatus !== statusFilter) {
+              continue;
+            }
+          }
+
           blockMatches.push({
             hash: tx.hash,
             blockNumber,
@@ -269,6 +305,7 @@ export async function GET(request: NextRequest) {
             from: tx.from,
             to: tx.to,
             value: tx.value.toString(),
+            status: txStatus,
           });
         }
 

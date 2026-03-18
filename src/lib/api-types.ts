@@ -17,6 +17,7 @@ export type TransactionListItem = {
   timestamp: string;
   from: string;
   to: string | null;
+  status: "success" | "failed" | "unknown";
   fromLabel?: string;
   toLabel?: string;
   valueWei: string;
@@ -81,7 +82,7 @@ export type TransactionDetailResponse = {
     input: string;
   };
   internalCalls: {
-    source: "trace_transaction" | "debug_traceTransaction" | "none";
+    source: "trace_transaction" | "debug_traceTransaction" | "blockscout_internal_transactions" | "none";
     unavailableReason: string | null;
     items: {
       depth: number;
