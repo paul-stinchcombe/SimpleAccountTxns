@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { formatEther } from "viem";
 
 import { getAddressLabels } from "@/src/lib/address-labels";
+import { decodeMethodCall, type DecodedMethodCall } from "@/src/lib/decoders";
 import {
   fetchBlockscoutTransactions,
   getBlockscoutBaseUrl,
@@ -24,6 +25,7 @@ import {
 const BACKFILL_START_TIMESTAMP_SEC = 1772323200; // 2026-03-01T00:00:00Z
 
 type StatusFilter = "all" | "success" | "failed";
+type AccountScope = "simpleAccount" | "fundingWallet";
 
 function toListStatus(status: number | null | undefined): "success" | "failed" | "unknown" {
   if (status === 1) {
@@ -33,6 +35,144 @@ function toListStatus(status: number | null | undefined): "success" | "failed" |
     return "failed";
   }
   return "unknown";
+}
+
+function contractHintsFromLabel(label: string | undefined): string[] {
+  if (!label) {
+    return [];
+  }
+  const lowered = label.toLowerCase();
+  const hints: string[] = [];
+  if (lowered.includes("simpleaccount") || lowered.includes("simple account")) {
+    hints.push("SimpleAccount");
+  }
+  if (lowered.includes("entrypoint") || lowered.includes("entry point")) {
+    hints.push("EntryPoint");
+  }
+  if (lowered.includes("factory")) {
+    hints.push("SimpleAccountFactory");
+  }
+  if (lowered.includes("kami transfer")) {
+    hints.push("KamiTransfer");
+  }
+  if (lowered.includes("kami royalty")) {
+    hints.push("KamiRoyalty");
+  }
+  if (lowered.includes("kami rental")) {
+    hints.push("KamiRental");
+  }
+  if (lowered.includes("kami platform")) {
+    hints.push("KamiPlatform");
+  }
+  if (lowered.includes("kami nft core")) {
+    hints.push("KamiNFTCore");
+  }
+  return hints;
+}
+
+function nestedDecodedMethodName(decoded: DecodedMethodCall): string | undefined {
+  if (!decoded.args) {
+    return undefined;
+  }
+  for (const arg of decoded.args) {
+    const nested = arg.nestedDecodedMethod;
+    if (nested?.status === "decoded" && nested.functionName) {
+      return nested.functionName;
+    }
+  }
+  return undefined;
+}
+
+function methodIntent(decoded: DecodedMethodCall): string | null {
+  if (decoded.status !== "decoded") {
+    return null;
+  }
+  const functionName = nestedDecodedMethodName(decoded) ?? decoded.functionName ?? "";
+  const candidate = functionName.toLowerCase();
+  if (!candidate) {
+    return null;
+  }
+
+  const exactMap: Record<string, string> = {
+    deploy721c: "Deploy ERC721 collection",
+    deploy721ac: "Deploy ERC721A collection",
+    deploy1155c: "Deploy ERC1155 collection",
+    mint721c: "Mint ERC721 NFT",
+    mint721ac: "Mint ERC721A NFT",
+    mint1155c: "Mint ERC1155 NFT",
+    burn721c: "Burn ERC721 NFT",
+    burn721ac: "Burn ERC721A NFT",
+    burn1155c: "Burn ERC1155 NFT",
+    transfer: "Transfer assets",
+    sell: "List/Sell asset",
+    rent: "Start rental",
+    endrental: "End rental",
+    extendrental: "Extend rental",
+    setprice: "Update listing price",
+    settokenuri: "Update token metadata",
+    setroyaltyreceivers: "Update royalty receivers",
+    charges: "Charge payment",
+    refund: "Refund payment",
+    prefundescrow: "Prefund escrow",
+    createaccount: "Create smart account",
+    handleops: "Process account operations",
+    validateuserop: "Validate user operation",
+    getsenderaddress: "Resolve account address",
+    execute: "Execute contract call",
+    executebatch: "Execute batch contract calls",
+    approvetransfer: "Approve transfer",
+  };
+
+  if (exactMap[candidate]) {
+    return exactMap[candidate];
+  }
+
+  if (candidate.includes("mint")) return "Mint NFT";
+  if (candidate.includes("refund")) return "Refund payment";
+  if (candidate.includes("burn")) return "Burn NFT";
+  if (candidate.includes("approve")) return "Approve token spend";
+  if (candidate.includes("createaccount")) return "Create smart account";
+  if (candidate.includes("handleops")) return "Process account operations";
+  if (candidate.includes("extendrent")) return "Extend rental";
+  if (candidate.includes("endrent")) return "End rental";
+  if (candidate.includes("rent")) return "Rental action";
+  if (candidate.includes("sell") || candidate.includes("list")) return "Sell/List asset";
+  if (candidate.includes("setprice")) return "Update listing price";
+  if (candidate.includes("settokenuri")) return "Update token metadata";
+  if (candidate.includes("royalty")) return "Update royalties";
+  if (candidate.includes("charge")) return "Charge payment";
+  if (candidate.includes("escrow")) return "Escrow funding action";
+  if (candidate.includes("transfer")) return "Transfer assets";
+  if (candidate.includes("executebatch")) return "Execute batch contract calls";
+  if (candidate.includes("execute")) return "Execute contract call";
+
+  return `Contract call: ${functionName}`;
+}
+
+function summarizeTransaction(params: {
+  from: string;
+  valueEth: string;
+  decodedMethod: DecodedMethodCall;
+  accountScope: AccountScope;
+  targetAddress: string;
+  toLabel?: string;
+}): string {
+  const isOutgoing = params.from.toLowerCase() === params.targetAddress.toLowerCase();
+  const direction = isOutgoing ? "Outgoing" : "Incoming";
+  const intent = methodIntent(params.decodedMethod);
+  if (intent) {
+    return `${direction}: ${intent}`;
+  }
+
+  if (params.valueEth !== "0") {
+    return isOutgoing ? `Send ${params.valueEth} ETH` : `Receive ${params.valueEth} ETH`;
+  }
+
+  if (params.toLabel) {
+    return isOutgoing ? `Call ${params.toLabel}` : `Interaction from ${params.toLabel}`;
+  }
+
+  return params.accountScope === "fundingWallet" ? "Funding wallet activity" : "Account activity";
 }
 
 async function upsertExplorerTransactions(items: NormalizedExplorerTx[]) {
@@ -86,6 +226,7 @@ export async function GET(request: NextRequest) {
     chainId: request.nextUrl.searchParams.get("chainId"),
     cursor: request.nextUrl.searchParams.get("cursor") ?? undefined,
     q: request.nextUrl.searchParams.get("q") ?? undefined,
+    accountScope: request.nextUrl.searchParams.get("accountScope") ?? undefined,
     status: request.nextUrl.searchParams.get("status") ?? undefined,
     limit: request.nextUrl.searchParams.get("limit") ?? undefined,
   });
@@ -104,6 +245,7 @@ export async function GET(request: NextRequest) {
     const { chainId } = parsedQuery.data;
     const searchQuery = parsedQuery.data.q?.trim();
     const normalizedSearch = searchQuery?.toLowerCase();
+    const accountScope = parsedQuery.data.accountScope as AccountScope;
     const statusFilter = parsedQuery.data.status as StatusFilter;
     const limit = safeLimit(parsedQuery.data.limit, 25);
     const windowSize = Math.max(10, envNumber("TX_SCAN_WINDOW", 30));
@@ -113,7 +255,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: "Chain was not found." }, { status: 404 });
     }
 
-    const simpleAccount = chain.simpleAccountAddress.toLowerCase();
+    const targetAddress =
+      accountScope === "fundingWallet"
+        ? chain.platformFundingWalletAddress.toLowerCase()
+        : chain.simpleAccountAddress.toLowerCase();
     const cursorBlock = parseBlockCursor(parsedQuery.data.cursor);
 
     const searchFilter: Prisma.transactionWhereInput | undefined = normalizedSearch
@@ -143,8 +288,8 @@ export async function GET(request: NextRequest) {
       where: {
         chainId,
         OR: [
-          { from: { equals: simpleAccount, mode: "insensitive" } },
-          { to: { equals: simpleAccount, mode: "insensitive" } },
+          { from: { equals: targetAddress, mode: "insensitive" } },
+          { to: { equals: targetAddress, mode: "insensitive" } },
         ],
         blockNumber:
           cursorBlock !== undefined
@@ -167,7 +312,7 @@ export async function GET(request: NextRequest) {
         const supplemental = await fetchBlockscoutTransactions({
           baseUrl: blockscoutBase,
           chainId,
-          simpleAccountAddress: chain.simpleAccountAddress,
+          simpleAccountAddress: targetAddress,
           limit,
           cursorBlock: parsedQuery.data.cursor,
           fromTimestampSec: BACKFILL_START_TIMESTAMP_SEC,
@@ -180,8 +325,8 @@ export async function GET(request: NextRequest) {
           where: {
             chainId,
             OR: [
-              { from: { equals: simpleAccount, mode: "insensitive" } },
-              { to: { equals: simpleAccount, mode: "insensitive" } },
+              { from: { equals: targetAddress, mode: "insensitive" } },
+              { to: { equals: targetAddress, mode: "insensitive" } },
             ],
             blockNumber:
               cursorBlock !== undefined
@@ -225,6 +370,22 @@ export async function GET(request: NextRequest) {
           status: toListStatus(row.status),
           fromLabel: labels[row.from.toLowerCase()]?.label,
           toLabel: row.to ? labels[row.to.toLowerCase()]?.label : undefined,
+          summary: (() => {
+            const toLabel = row.to ? labels[row.to.toLowerCase()]?.label : undefined;
+            const decodedMethod = decodeMethodCall(row.data ?? "0x", {
+              preferredContractNames: contractHintsFromLabel(toLabel),
+              recursivelyDecodeBytesArgs: true,
+              maxRecursionDepth: 2,
+            });
+            return summarizeTransaction({
+              from: row.from,
+              valueEth,
+              decodedMethod,
+              accountScope,
+              targetAddress,
+              toLabel,
+            });
+          })(),
           valueWei,
           valueEth,
         };
@@ -239,7 +400,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         chainId: chain.chainId,
         chainName: chain.chainName,
+        accountScope,
+        targetAddress,
         simpleAccountAddress: chain.simpleAccountAddress,
+        platformFundingWalletAddress: chain.platformFundingWalletAddress,
         items,
         pagination: {
           limit,
@@ -272,7 +436,7 @@ export async function GET(request: NextRequest) {
           }
           const from = normalizeAddress(tx.from);
           const to = normalizeAddress(tx.to);
-          if (from !== simpleAccount && to !== simpleAccount) {
+          if (from !== targetAddress && to !== targetAddress) {
             continue;
           }
           if (normalizedSearch) {
@@ -305,6 +469,7 @@ export async function GET(request: NextRequest) {
             from: tx.from,
             to: tx.to,
             value: tx.value.toString(),
+            input: tx.input,
             status: txStatus,
           });
         }
@@ -323,7 +488,9 @@ export async function GET(request: NextRequest) {
       scanStart = scanEnd - BigInt(1);
     }
 
-    const items = merged.slice(0, limit).map(toTransactionListItem);
+    const mergedPage = merged.slice(0, limit);
+    const items = mergedPage.map(toTransactionListItem);
+    const mergedByHash = new Map(mergedPage.map((tx) => [tx.hash.toLowerCase(), tx]));
     const labels = await getAddressLabels({
       chainId,
       addresses: items.flatMap((item) => [item.from, item.to]),
@@ -333,13 +500,33 @@ export async function GET(request: NextRequest) {
       ...item,
       fromLabel: labels[item.from.toLowerCase()]?.label,
       toLabel: item.to ? labels[item.to.toLowerCase()]?.label : undefined,
+      summary: (() => {
+        const sourceTx = mergedByHash.get(item.hash.toLowerCase());
+        const toLabel = item.to ? labels[item.to.toLowerCase()]?.label : undefined;
+        const decodedMethod = decodeMethodCall(sourceTx?.input?.toString() ?? "0x", {
+          preferredContractNames: contractHintsFromLabel(toLabel),
+          recursivelyDecodeBytesArgs: true,
+          maxRecursionDepth: 2,
+        });
+        return summarizeTransaction({
+          from: item.from,
+          valueEth: item.valueEth,
+          decodedMethod,
+          accountScope,
+          targetAddress,
+          toLabel,
+        });
+      })(),
     }));
     const nextCursor = toCursorFromBlock(scanStart);
 
     return NextResponse.json({
       chainId: chain.chainId,
       chainName: chain.chainName,
+      accountScope,
+      targetAddress,
       simpleAccountAddress: chain.simpleAccountAddress,
+      platformFundingWalletAddress: chain.platformFundingWalletAddress,
       items: itemsWithLabels,
       pagination: {
         limit,

@@ -5,6 +5,7 @@ export type ChainOption = {
   rpcUrl: string;
   isDefault: boolean;
   simpleAccountAddress: string;
+  platformFundingWalletAddress: string;
 };
 
 export type ChainsResponse = {
@@ -35,6 +36,7 @@ export type TransactionListItem = {
   from: string;
   to: string | null;
   status: "success" | "failed" | "unknown";
+  summary: string;
   fromLabel?: string;
   toLabel?: string;
   valueWei: string;
@@ -59,7 +61,10 @@ export type AddressLabel = {
 export type TransactionsResponse = {
   chainId: string;
   chainName: string;
+  accountScope: "simpleAccount" | "fundingWallet";
+  targetAddress: string;
   simpleAccountAddress: string;
+  platformFundingWalletAddress: string;
   items: TransactionListItem[];
   pagination: {
     limit: number;

@@ -7,6 +7,7 @@ export type ChainContext = {
   rpcUrl: string;
   isDefault: boolean;
   simpleAccountAddress: string;
+  platformFundingWalletAddress: string;
 };
 
 export async function listChainsWithPlatform(): Promise<ChainContext[]> {
@@ -22,11 +23,19 @@ export async function listChainsWithPlatform(): Promise<ChainContext[]> {
       },
     }),
     prisma.platform.findMany({
-      select: { chainId: true, simpleAccountAddress: true },
+      select: { chainId: true, simpleAccountAddress: true, platformFundingWalletAddress: true },
     }),
   ]);
 
-  const platformMap = new Map(platforms.map((item) => [item.chainId, item.simpleAccountAddress]));
+  const platformMap = new Map(
+    platforms.map((item) => [
+      item.chainId,
+      {
+        simpleAccountAddress: item.simpleAccountAddress,
+        platformFundingWalletAddress: item.platformFundingWalletAddress,
+      },
+    ]),
+  );
   return chains
     .filter((chain) => platformMap.has(chain.chainId))
     .map((chain) => ({
@@ -35,7 +44,8 @@ export async function listChainsWithPlatform(): Promise<ChainContext[]> {
       logoUrl: chain.logoUrl,
       rpcUrl: chain.rpcUrl,
       isDefault: chain.default,
-      simpleAccountAddress: platformMap.get(chain.chainId) as string,
+      simpleAccountAddress: platformMap.get(chain.chainId)?.simpleAccountAddress as string,
+      platformFundingWalletAddress: platformMap.get(chain.chainId)?.platformFundingWalletAddress as string,
     }));
 }
 
@@ -56,6 +66,7 @@ export async function getChainContext(chainId: string): Promise<ChainContext | n
       select: {
         chainId: true,
         simpleAccountAddress: true,
+        platformFundingWalletAddress: true,
       },
     }),
   ]);
@@ -71,5 +82,6 @@ export async function getChainContext(chainId: string): Promise<ChainContext | n
     rpcUrl: chain.rpcUrl,
     isDefault: chain.default,
     simpleAccountAddress: platform.simpleAccountAddress,
+    platformFundingWalletAddress: platform.platformFundingWalletAddress,
   };
 }

@@ -7,6 +7,7 @@ export type RpcTransaction = {
   from: `0x${string}` | string;
   to: `0x${string}` | string | null;
   value: `0x${string}` | string;
+  input?: `0x${string}` | string;
   status?: "success" | "failed" | "unknown";
 };
 
@@ -42,6 +43,7 @@ export type TransactionListItem = {
   from: string;
   to: string | null;
   status: "success" | "failed" | "unknown";
+  summary: string;
   valueWei: string;
   valueEth: string;
 };
@@ -58,6 +60,7 @@ export function toTransactionListItem(tx: RpcTransaction): TransactionListItem {
     from: tx.from.toString().toLowerCase(),
     to: tx.to ? tx.to.toString().toLowerCase() : null,
     status: tx.status ?? "unknown",
+    summary: "Contract interaction",
     valueWei,
     valueEth: formatEther(BigInt(valueWei)),
   };

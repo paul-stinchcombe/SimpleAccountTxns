@@ -12,14 +12,17 @@ type TransactionListProps = {
   chainId: string;
   chainName: string;
   simpleAccountAddress: string;
+  platformFundingWalletAddress: string;
   searchQuery: string;
   statusFilter: "all" | "success" | "failed";
+  accountScope: "simpleAccount" | "fundingWallet";
 };
 
 async function fetchTransactions(
   chainId: string,
   searchQuery: string,
   statusFilter: "all" | "success" | "failed",
+  accountScope: "simpleAccount" | "fundingWallet",
   cursor?: string,
 ): Promise<TransactionsResponse> {
   const params = new URLSearchParams({ chainId, limit: "25" });
@@ -30,6 +33,7 @@ async function fetchTransactions(
   if (statusFilter !== "all") {
     params.set("status", statusFilter);
   }
+  params.set("accountScope", accountScope);
   if (cursor) {
     params.set("cursor", cursor);
   }
@@ -44,15 +48,17 @@ export function TransactionList({
   chainId,
   chainName,
   simpleAccountAddress,
+  platformFundingWalletAddress,
   searchQuery,
   statusFilter,
+  accountScope,
 }: TransactionListProps) {
   const [selectedTx, setSelectedTx] = useState<TransactionListItem | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const query = useInfiniteQuery({
-    queryKey: ["transactions", chainId, searchQuery, statusFilter],
-    queryFn: ({ pageParam }) => fetchTransactions(chainId, searchQuery, statusFilter, pageParam),
+    queryKey: ["transactions", chainId, searchQuery, statusFilter, accountScope],
+    queryFn: ({ pageParam }) => fetchTransactions(chainId, searchQuery, statusFilter, accountScope, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.pagination.nextCursor,
   });
@@ -103,10 +109,15 @@ export function TransactionList({
   return (
     <section className="mt-6">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-        <h2 className="text-lg font-semibold text-white">SimpleAccount transactions</h2>
+        <h2 className="text-lg font-semibold text-white">
+          {accountScope === "fundingWallet" ? "Funding Wallet transactions" : "SimpleAccount transactions"}
+        </h2>
         <p className="mt-2 text-sm text-slate-300">
-          Viewing <span className="font-medium text-indigo-200">{chainName}</span> • SimpleAccount{" "}
-          <span className="font-mono text-xs text-slate-200">{simpleAccountAddress}</span>
+          Viewing <span className="font-medium text-indigo-200">{chainName}</span> •{" "}
+          {accountScope === "fundingWallet" ? "Funding Wallet" : "SimpleAccount"}{" "}
+          <span className="font-mono text-xs text-slate-200">
+            {accountScope === "fundingWallet" ? platformFundingWalletAddress : simpleAccountAddress}
+          </span>
         </p>
         {searchQuery.trim() ? (
           <p className="mt-2 text-xs text-slate-400">
@@ -165,6 +176,9 @@ export function TransactionList({
                   <span className="text-slate-400">Time:</span> {formatTimestamp(tx.timestamp)}
                 </p>
               </div>
+              <p className="mt-2 text-xs text-slate-300">
+                <span className="text-slate-400">Summary:</span> {tx.summary}
+              </p>
             </button>
           ))}
         </div>
