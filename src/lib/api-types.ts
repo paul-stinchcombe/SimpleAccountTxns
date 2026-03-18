@@ -11,12 +11,6 @@ export type ChainsResponse = {
   chains: ChainOption[];
 };
 
-export type DecodedMethodArg = {
-  name: string;
-  type: string;
-  value: string;
-};
-
 export type DecodedMethodCall = {
   selector: string;
   status: "decoded" | "empty" | "unknown" | "invalid";
@@ -25,6 +19,13 @@ export type DecodedMethodCall = {
   args?: DecodedMethodArg[];
   contractNames?: string[];
   error?: string;
+};
+
+export type DecodedMethodArg = {
+  name: string;
+  type: string;
+  value: string;
+  nestedDecodedMethod?: DecodedMethodCall;
 };
 
 export type TransactionListItem = {

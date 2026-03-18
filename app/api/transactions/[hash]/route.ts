@@ -107,6 +107,41 @@ function humanizeInternalCallReason(reason: string, blockscoutConfigured: boolea
     : "This RPC endpoint does not support trace methods for this network. Configure BLOCKSCOUT_API_BASE_<CHAIN_ID> to enable Blockscout fallback.";
 }
 
+function contractHintsFromLabel(label: string | undefined): string[] {
+  if (!label) {
+    return [];
+  }
+  const hints: string[] = [];
+  const lowered = label.toLowerCase();
+
+  if (lowered.includes("kami transfer")) {
+    hints.push("KamiTransfer");
+  }
+  if (lowered.includes("kami royalty")) {
+    hints.push("KamiRoyalty");
+  }
+  if (lowered.includes("kami rental")) {
+    hints.push("KamiRental");
+  }
+  if (lowered.includes("kami platform")) {
+    hints.push("KamiPlatform");
+  }
+  if (lowered.includes("kami nft core")) {
+    hints.push("KamiNFTCore");
+  }
+  if (lowered.includes("simpleaccount") || lowered.includes("simple account")) {
+    hints.push("SimpleAccount");
+  }
+  if (lowered.includes("entrypoint") || lowered.includes("entry point")) {
+    hints.push("EntryPoint");
+  }
+  if (lowered.includes("factory")) {
+    hints.push("SimpleAccountFactory");
+  }
+
+  return hints;
+}
+
 export async function GET(request: NextRequest, context: Params) {
   const { hash } = await context.params;
   const parsedQuery = TransactionDetailQuerySchema.safeParse({
@@ -329,7 +364,12 @@ export async function GET(request: NextRequest, context: Params) {
 
     const txFrom = tx.from.toLowerCase();
     const txTo = tx.to?.toLowerCase() ?? null;
-    const decodedTxMethod = decodeMethodCall(tx.input);
+    const txToLabel = txTo ? labels[txTo]?.label : undefined;
+    const decodedTxMethod = decodeMethodCall(tx.input, {
+      preferredContractNames: contractHintsFromLabel(txToLabel),
+      recursivelyDecodeBytesArgs: true,
+      maxRecursionDepth: 2,
+    });
 
     return NextResponse.json({
       chain: {
@@ -366,11 +406,16 @@ export async function GET(request: NextRequest, context: Params) {
         source: internalCalls.source,
         unavailableReason: internalCalls.unavailableReason ?? null,
         items: internalCalls.calls.map((call) => {
-          const decodedMethod = decodeMethodCall(call.input);
+          const toLabel = labels[call.to.toLowerCase()]?.label;
+          const decodedMethod = decodeMethodCall(call.input, {
+            preferredContractNames: contractHintsFromLabel(toLabel),
+            recursivelyDecodeBytesArgs: true,
+            maxRecursionDepth: 2,
+          });
           return {
             ...call,
             fromLabel: labels[call.from.toLowerCase()]?.label,
-            toLabel: labels[call.to.toLowerCase()]?.label,
+            toLabel,
             methodId: decodedMethod.selector,
             decodedMethod,
           };

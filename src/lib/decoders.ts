@@ -17,6 +17,7 @@ export type DecodedMethodArg = {
   name: string;
   type: string;
   value: string;
+  nestedDecodedMethod?: DecodedMethodCall;
 };
 
 export type DecodedMethodCall = {
@@ -30,8 +31,41 @@ export type DecodedMethodCall = {
 };
 
 type DecoderIndex = Map<string, DecoderEntry[]>;
+type DecoderByContract = Map<string, DecoderEntry[]>;
 
 let cachedIndex: DecoderIndex | null = null;
+let cachedByContract: DecoderByContract | null = null;
+
+type DecodeMethodOptions = {
+  preferredContractNames?: string[];
+  recursivelyDecodeBytesArgs?: boolean;
+  maxRecursionDepth?: number;
+};
+
+const KNOWN_WRAPPER_FUNCTIONS: AbiFunction[] = [
+  {
+    type: "function",
+    name: "execute",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "target", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "executeBatch",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "dest", type: "address[]" },
+      { name: "value", type: "uint256[]" },
+      { name: "func", type: "bytes[]" },
+    ],
+    outputs: [],
+  },
+];
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -80,8 +114,12 @@ function formatDecodedArgs(functionAbi: AbiFunction, args: readonly unknown[]): 
   }));
 }
 
-function buildDecoderIndex(artifacts: ArtifactLike[]): DecoderIndex {
+function buildDecoderData(artifacts: ArtifactLike[]): {
+  index: DecoderIndex;
+  byContract: DecoderByContract;
+} {
   const index: DecoderIndex = new Map();
+  const byContract: DecoderByContract = new Map();
   for (const artifact of artifacts) {
     if (!Array.isArray(artifact.abi)) {
       continue;
@@ -110,9 +148,20 @@ function buildDecoderIndex(artifacts: ArtifactLike[]): DecoderIndex {
         signature,
       });
       index.set(selector, entries);
+
+      const contractKey = normalizeContractNameCandidate(contractName);
+      const contractEntries = byContract.get(contractKey) ?? [];
+      if (!contractEntries.some((entry) => entry.signature === signature)) {
+        contractEntries.push({
+          contractNames: new Set([contractName]),
+          functionAbi,
+          signature,
+        });
+      }
+      byContract.set(contractKey, contractEntries);
     }
   }
-  return index;
+  return { index, byContract };
 }
 
 function walkJsonFiles(baseDir: string): string[] {
@@ -157,8 +206,20 @@ function getDecoderIndex(): DecoderIndex {
   if (cachedIndex) {
     return cachedIndex;
   }
-  cachedIndex = buildDecoderIndex(loadArtifactsFromPublicContracts());
+  const built = buildDecoderData(loadArtifactsFromPublicContracts());
+  cachedIndex = built.index;
+  cachedByContract = built.byContract;
   return cachedIndex;
+}
+
+function getDecoderByContract(): DecoderByContract {
+  if (cachedByContract) {
+    return cachedByContract;
+  }
+  const built = buildDecoderData(loadArtifactsFromPublicContracts());
+  cachedIndex = built.index;
+  cachedByContract = built.byContract;
+  return cachedByContract;
 }
 
 function isLikelyCalldata(input: string): boolean {
@@ -169,7 +230,121 @@ function normalizeSelector(input: string): string {
   return input.slice(0, 10).toLowerCase();
 }
 
-export function decodeMethodCallWithIndex(input: string, index: DecoderIndex): DecodedMethodCall {
+function normalizeContractNameCandidate(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function resolvePreferredEntries(
+  preferredContractNames: string[] | undefined,
+  indexEntries: DecoderEntry[] | undefined,
+): DecoderEntry[] | undefined {
+  if (!indexEntries || indexEntries.length === 0) {
+    return indexEntries;
+  }
+  if (!preferredContractNames || preferredContractNames.length === 0) {
+    return indexEntries;
+  }
+  const wanted = new Set(preferredContractNames.map((name) => normalizeContractNameCandidate(name)));
+  const filtered = indexEntries.filter((entry) =>
+    [...entry.contractNames].some((name) => wanted.has(normalizeContractNameCandidate(name))),
+  );
+  return filtered.length > 0 ? filtered : indexEntries;
+}
+
+function tryDecodeWithKnownWrappers(
+  input: string,
+  index: DecoderIndex,
+  options: DecodeMethodOptions | undefined,
+  recursionDepth: number,
+): DecodedMethodCall | null {
+  const selector = normalizeSelector(input);
+  for (const functionAbi of KNOWN_WRAPPER_FUNCTIONS) {
+    const signature = toSignature(functionAbi);
+    const knownSelector = toFunctionSelector(signature).toLowerCase();
+    if (knownSelector !== selector) {
+      continue;
+    }
+    try {
+      const decoded = decodeFunctionData({
+        abi: [functionAbi] as Abi,
+        data: input as `0x${string}`,
+      });
+      const decodedArgs = Array.isArray(decoded.args) ? decoded.args : [];
+      const formattedArgs = formatDecodedArgs(functionAbi, decodedArgs);
+      const inputs = functionAbi.inputs ?? [];
+      const argsWithNestedDecode = formattedArgs.map((arg, argIndex) => {
+        const nestedDecodedMethod = maybeDecodeNestedBytesArg(
+          inputs[argIndex]?.type ?? arg.type,
+          decodedArgs[argIndex],
+          index,
+          options,
+          recursionDepth,
+        );
+        return nestedDecodedMethod ? { ...arg, nestedDecodedMethod } : arg;
+      });
+
+      return {
+        selector,
+        status: "decoded",
+        functionName: functionAbi.name,
+        signature,
+        args: argsWithNestedDecode,
+        contractNames: ["KnownWrapper"],
+      };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function maybeDecodeNestedBytesArg(
+  argType: string,
+  argValue: unknown,
+  index: DecoderIndex,
+  options: DecodeMethodOptions | undefined,
+  recursionDepth: number,
+): DecodedMethodCall | undefined {
+  if (recursionDepth <= 0) {
+    return undefined;
+  }
+  if (!options?.recursivelyDecodeBytesArgs) {
+    return undefined;
+  }
+  if (argType === "bytes[]") {
+    if (!Array.isArray(argValue)) {
+      return undefined;
+    }
+    for (const item of argValue) {
+      if (typeof item !== "string" || !isLikelyCalldata(item) || item.length < 10) {
+        continue;
+      }
+      const decodedArrayItem = decodeMethodCallWithIndex(item, index, options, recursionDepth - 1);
+      if (decodedArrayItem.status === "decoded") {
+        return decodedArrayItem;
+      }
+    }
+    return undefined;
+  }
+  if (argType !== "bytes") {
+    return undefined;
+  }
+  if (typeof argValue !== "string") {
+    return undefined;
+  }
+  if (!isLikelyCalldata(argValue) || argValue.length < 10) {
+    return undefined;
+  }
+  const decoded = decodeMethodCallWithIndex(argValue, index, options, recursionDepth - 1);
+  return decoded.status === "decoded" ? decoded : undefined;
+}
+
+export function decodeMethodCallWithIndex(
+  input: string,
+  index: DecoderIndex,
+  options?: DecodeMethodOptions,
+  recursionDepth = options?.maxRecursionDepth ?? 1,
+): DecodedMethodCall {
   if (!input || input === "0x") {
     return {
       selector: "0x",
@@ -186,8 +361,12 @@ export function decodeMethodCallWithIndex(input: string, index: DecoderIndex): D
   }
 
   const selector = normalizeSelector(input);
-  const entries = index.get(selector);
+  const entries = resolvePreferredEntries(options?.preferredContractNames, index.get(selector));
   if (!entries || entries.length === 0) {
+    const wrapperDecoded = tryDecodeWithKnownWrappers(input, index, options, recursionDepth);
+    if (wrapperDecoded) {
+      return wrapperDecoded;
+    }
     return {
       selector,
       status: "unknown",
@@ -203,13 +382,25 @@ export function decodeMethodCallWithIndex(input: string, index: DecoderIndex): D
         data: input as `0x${string}`,
       });
       const decodedArgs = Array.isArray(decoded.args) ? decoded.args : [];
+      const formattedArgs = formatDecodedArgs(entry.functionAbi, decodedArgs);
+      const inputs = entry.functionAbi.inputs ?? [];
+      const argsWithNestedDecode = formattedArgs.map((arg, argIndex) => {
+        const nestedDecodedMethod = maybeDecodeNestedBytesArg(
+          inputs[argIndex]?.type ?? arg.type,
+          decodedArgs[argIndex],
+          index,
+          options,
+          recursionDepth,
+        );
+        return nestedDecodedMethod ? { ...arg, nestedDecodedMethod } : arg;
+      });
 
       return {
         selector,
         status: "decoded",
         functionName: entry.functionAbi.name,
         signature: entry.signature,
-        args: formatDecodedArgs(entry.functionAbi, decodedArgs),
+        args: argsWithNestedDecode,
         contractNames: [...entry.contractNames].sort((a, b) => a.localeCompare(b)),
       };
     } catch (error) {
@@ -225,9 +416,39 @@ export function decodeMethodCallWithIndex(input: string, index: DecoderIndex): D
 }
 
 export function decodeMethodCallWithArtifacts(input: string, artifacts: ArtifactLike[]): DecodedMethodCall {
-  return decodeMethodCallWithIndex(input, buildDecoderIndex(artifacts));
+  const built = buildDecoderData(artifacts);
+  return decodeMethodCallWithIndex(input, built.index, {
+    recursivelyDecodeBytesArgs: true,
+    maxRecursionDepth: 2,
+  });
 }
 
-export function decodeMethodCall(input: string): DecodedMethodCall {
-  return decodeMethodCallWithIndex(input, getDecoderIndex());
+export function decodeMethodCall(input: string, options?: DecodeMethodOptions): DecodedMethodCall {
+  const decoderIndex = getDecoderIndex();
+  const decoderByContract = getDecoderByContract();
+  const contractHints = options?.preferredContractNames ?? [];
+  const normalizedHints = contractHints.map((name) => normalizeContractNameCandidate(name));
+  const mergedEntries = new Map(decoderIndex);
+
+  for (const hint of normalizedHints) {
+    const entries = decoderByContract.get(hint);
+    if (!entries) {
+      continue;
+    }
+    // Keep selector matching from global index, but allow hint list normalization variants.
+    for (const entry of entries) {
+      const selector = toFunctionSelector(entry.signature).toLowerCase();
+      const current = mergedEntries.get(selector) ?? [];
+      if (!current.some((item) => item.signature === entry.signature)) {
+        current.push(entry);
+      }
+      mergedEntries.set(selector, current);
+    }
+  }
+
+  return decodeMethodCallWithIndex(input, mergedEntries, {
+    preferredContractNames: contractHints,
+    recursivelyDecodeBytesArgs: options?.recursivelyDecodeBytesArgs ?? true,
+    maxRecursionDepth: options?.maxRecursionDepth ?? 2,
+  });
 }

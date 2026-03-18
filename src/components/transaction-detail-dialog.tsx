@@ -67,6 +67,7 @@ function DecodedMethodSummary({ method }: { method: TransactionDetailResponse["t
           {method.args.slice(0, 5).map((arg) => (
             <p key={`${arg.name}-${arg.type}`} className="font-mono text-[11px] text-slate-400">
               {arg.name || "_"} ({arg.type}): {arg.value}
+              {arg.nestedDecodedMethod?.signature ? ` => ${arg.nestedDecodedMethod.signature}` : ""}
             </p>
           ))}
           {method.args.length > 5 ? (
@@ -180,7 +181,14 @@ export function TransactionDetailDialog({ tx, chainId, open, onOpenChange }: Tra
                           <p className="mt-1 font-mono text-[11px] text-slate-500">
                             {call.decodedMethod.args
                               .slice(0, 2)
-                              .map((arg) => `${arg.name || "_"}=${arg.value}`)
+                              .map(
+                                (arg) =>
+                                  `${arg.name || "_"}=${arg.value}${
+                                    arg.nestedDecodedMethod?.signature
+                                      ? ` => ${arg.nestedDecodedMethod.signature}`
+                                      : ""
+                                  }`,
+                              )
                               .join(" • ")}
                             {call.decodedMethod.args.length > 2
                               ? ` • +${call.decodedMethod.args.length - 2} more`

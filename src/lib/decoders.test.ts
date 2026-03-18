@@ -25,6 +25,30 @@ const approveFunctionAbi = {
   outputs: [{ name: "", type: "bool" }],
 } as const;
 
+const executeFunctionAbi = {
+  type: "function",
+  name: "execute",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "target", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+  ],
+  outputs: [],
+} as const;
+
+const executeBatchFunctionAbi = {
+  type: "function",
+  name: "executeBatch",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "dest", type: "address[]" },
+    { name: "value", type: "uint256[]" },
+    { name: "func", type: "bytes[]" },
+  ],
+  outputs: [],
+} as const;
+
 describe("decodeMethodCallWithArtifacts", () => {
   it("decodes known calldata and returns signature + named args", () => {
     const tokenArtifact: ArtifactLike = {
@@ -93,5 +117,64 @@ describe("decodeMethodCallWithArtifacts", () => {
 
     expect(result.status).toBe("empty");
     expect(result.selector).toBe("0x");
+  });
+
+  it("decodes known execute wrapper calls and nested calldata", () => {
+    const tokenArtifact: ArtifactLike = {
+      contractName: "MockToken",
+      abi: [transferFunctionAbi],
+    };
+    const nestedTransferCalldata = encodeFunctionData({
+      abi: [transferFunctionAbi] as unknown as Abi,
+      functionName: "transfer",
+      args: ["0x3333333333333333333333333333333333333333", BigInt(7)],
+    });
+    const executeCalldata = encodeFunctionData({
+      abi: [executeFunctionAbi] as unknown as Abi,
+      functionName: "execute",
+      args: [
+        "0x4444444444444444444444444444444444444444",
+        BigInt(0),
+        nestedTransferCalldata,
+      ],
+    });
+
+    const result = decodeMethodCallWithArtifacts(executeCalldata, [tokenArtifact]);
+
+    expect(result.status).toBe("decoded");
+    expect(result.signature).toBe("execute(address,uint256,bytes)");
+    expect(result.contractNames).toEqual(["KnownWrapper"]);
+    const nested = result.args?.[2]?.nestedDecodedMethod;
+    expect(nested?.status).toBe("decoded");
+    expect(nested?.signature).toBe("transfer(address,uint256)");
+  });
+
+  it("decodes known executeBatch wrapper and nested bytes[] calldata", () => {
+    const tokenArtifact: ArtifactLike = {
+      contractName: "MockToken",
+      abi: [approveFunctionAbi],
+    };
+    const nestedApproveCalldata = encodeFunctionData({
+      abi: [approveFunctionAbi] as unknown as Abi,
+      functionName: "approve",
+      args: ["0x5555555555555555555555555555555555555555", BigInt(9)],
+    });
+    const executeBatchCalldata = encodeFunctionData({
+      abi: [executeBatchFunctionAbi] as unknown as Abi,
+      functionName: "executeBatch",
+      args: [
+        ["0x6666666666666666666666666666666666666666"],
+        [BigInt(0)],
+        [nestedApproveCalldata],
+      ],
+    });
+
+    const result = decodeMethodCallWithArtifacts(executeBatchCalldata, [tokenArtifact]);
+
+    expect(result.status).toBe("decoded");
+    expect(result.signature).toBe("executeBatch(address[],uint256[],bytes[])");
+    const nested = result.args?.[2]?.nestedDecodedMethod;
+    expect(nested?.status).toBe("decoded");
+    expect(nested?.signature).toBe("approve(address,uint256)");
   });
 });
