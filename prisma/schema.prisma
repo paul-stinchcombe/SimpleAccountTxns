@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ContractType {
+  ERC721AC
+  ERC721C
+  ERC1155C
+  ERC20
+}
+
+enum FundingWalletType {
+  Quest
+  GasSponsor
+  Reward
+  Other
+}
+
+enum WalletType {
+  Platform
+  Sponsor
+}
+
+enum Web3TransactionType {
+  Deploy721C
+  Deploy721AC
+  Deploy1155C
+  Mint721C
+  Mint721AC
+  Mint1155C
+  Burn721C
+  Burn721AC
+  Burn1155C
+  Transfer
+  Sell
+  Rent
+  EndRental
+  ExtendRental
+  SetPrice
+  SetTokenURI
+  SetRoyaltyReceivers
+  Charges
+  Refund
+  PrefundEscrow
+}
+
+model user {
+  walletAddress String @id
+  userName      String @unique
+  firstName     String?
+  lastName      String?
+
+  assets           asset[]
+  vouchers         voucher[]
+  ownedCollections collection[] @relation("collectionOwner")
+}
+
+model project {
+  id            Int    @id @default(autoincrement())
+  name          String
+
+  assets     asset[]
+  vouchers   voucher[]
+  collection collection?
+}
+
+model product {
+  id        Int    @id @default(autoincrement())
+  name      String
+
+  assets  asset[]
+  voucher voucher?
+}
+
+model collection {
+  collectionId       Int          @id @default(autoincrement())
+  projectId          Int          @unique
+  name               String
+  symbol             String
+  chainId            String
+  contractAddress    String?      @unique
+  ownerWalletAddress String
+
+  owner    user      @relation("collectionOwner", fields: [ownerWalletAddress], references: [walletAddress])
+  project  project   @relation(fields: [projectId], references: [id])
+  assets   asset[]
+  vouchers voucher[]
+}
+
+model asset {
+  id              Int          @id @default(autoincrement())
+  walletAddress   String
+  chainId         String?
+  contractAddress String
+  tokenId         String
+  metadata        Json?
+  projectId       Int?
+  productId       Int?
+  collectionId    Int?
+  createdAt       Int
+
+  user       user        @relation(fields: [walletAddress], references: [walletAddress])
+  project    project?    @relation(fields: [projectId], references: [id])
+  product    product?    @relation(fields: [productId], references: [id])
+  collection collection? @relation(fields: [collectionId], references: [collectionId])
+
+  @@unique([walletAddress, contractAddress, tokenId, chainId])
+  @@index([chainId, contractAddress, tokenId])
+}
+
+model voucher {
+  id              Int    @id @default(autoincrement())
+  walletAddress   String
+  contractAddress String?
+  tokenId         String
+  metadata        Json
+  projectId       Int?
+  productId       Int?   @unique
+  collectionId    Int?
+
+  user       user        @relation(fields: [walletAddress], references: [walletAddress])
+  project    project?    @relation(fields: [projectId], references: [id])
+  product    product?    @relation(fields: [productId], references: [id])
+  collection collection? @relation(fields: [collectionId], references: [collectionId])
+}
+
+model platform {
+  chainId                      String @id
+  simpleAccountAddress         String
+  contractDeployerAddress      String
+  platformFundingWalletAddress String
+  platformAddress              String
+  kamiNFTCoreLibraryAddress    String
+  kamiPlatformLibraryAddress   String
+  kamiRoyaltyLibraryAddress    String
+  kamiRentalLibraryAddress     String
+  kamiTransferLibraryAddress   String
+}
+
+model blockchain {
+  chainId        String          @id
+  name           String
+  logoUrl        String?
+  rpcUrl         String
+  default        Boolean         @default(false)
+  paymentTokens  payment_token[]
+  transactions   transaction[]
+  fundingWallets fundingWallet[]
+}
+
+model payment_token {
+  id              Int        @id @default(autoincrement())
+  chainId         String
+  contractAddress String
+  name            String
+  symbol          String
+  decimals        Int
+  default         Boolean    @default(false)
+
+  blockchain blockchain @relation(fields: [chainId], references: [chainId])
+}
+
+model fundingWallet {
+  id            Int               @id @default(autoincrement())
+  type          FundingWalletType @default(Quest)
+  chainId       String
+  walletAddress String
+  name          String            @unique
+  description   String?
+  isActive      Boolean           @default(true)
+
+  blockchain blockchain @relation(fields: [chainId], references: [chainId])
+
+  @@unique([chainId, walletAddress, type])
+}
+
+model platformWallet {
+  id            Int        @id @default(autoincrement())
+  name          String
+  walletAddress String
+  chainId       String?
+  walletType    WalletType @default(Platform)
+  isActive      Boolean    @default(true)
+
+  @@unique([walletAddress, chainId])
+}
+
+model transaction {
+  hash             String @id
+  chainId          String
+  from             String
+  to               String
+  value            String
+  valueFormatted   String
+  gasLimit         String
+  gasPrice         String
+  blockNumber      Int?
+  blockHash        String?
+  transactionIndex Int?
+  status           Int?
+  nonce            Int
+  data             String
+  timestamp        BigInt
+
+  blockchain blockchain @relation(fields: [chainId], references: [chainId])
+}
